@@ -8,7 +8,9 @@ from math import pi
 import time
 import chirpanal
 
-resfreqs = [251.64, 252.58, 252.85, 282.03, 282.38, 284.3]
+
+resfreqs = [253.305, 254.248, 254.514, 283.687, 283.950, 285.974]
+#resfreqs = [251.64, 252.58, 252.85, 282.03, 282.38, 284.3]
 #resfreqs = [273.70,288.3,301.4,315.1,329.7]
 
 fn = sys.argv[1]
@@ -47,6 +49,7 @@ z = z[:nt].reshape((nchunk,ntotal))
 
 z = z[30:,:]
 
+z = z[::100]
 if not os.path.exists("fig"):
 	os.mkdir("fig")
 
@@ -131,7 +134,7 @@ if plot_basic:
 	pl.legend(loc='lower left')
 	pl.savefig('fig/psdrg.png')
 	pl.savefig(fn+'.png')
-	#pl.show()
+	pl.show()
 	exit()
 
 	pl.show()

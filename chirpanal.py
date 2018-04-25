@@ -96,22 +96,21 @@ def gaincal(y,vdc,vchop,chopfreq,rh,rb,rate):
     gain = rmssig/prms
     return gain
 
-#import matplotlib.pyplot as pl
 def peakfind_convolve(zf,reim=False):
     ''' Convolutional peak finding '''
 
     zfm = np.mean(zf,axis=0)
     tre = zfm.real + 0.
     tim = zfm.imag + 0.
-  
+
     if reim:
         rf = fftpack.fft(zf,axis=1)
         tf = np.fft.fft(tre + tim*1.0j)
     else:
         rf = fftpack.fft(np.abs(zf),axis=1)
         tf = np.fft.fft(np.abs(tre+tim*1.0j))
-    
-    
+
+
     rf *= np.conjugate(tf)[np.newaxis,:]
     nt = tf.size
 
@@ -120,23 +119,31 @@ def peakfind_convolve(zf,reim=False):
     ts = np.argmax(corr,axis=1)
     ts2 = np.zeros(ts.size)
 
-    # Poly fit to the peak of the convolution 
+    # Poly fit to the peak of the convolution
     ii = np.arange(5) - 2
     A = np.vander(ii,N=3)
     AtA = np.dot(A.T,A)
     AtAi = np.linalg.inv(AtA)
     solv = np.dot(AtAi,A.T)
+    # For very noisy scans, the peak may mistakenly be at the edge of the
+    # region. If the average though is a good representation of the
+    # position of the resonance, then discarding the edge scans
+    # shouldn't adversely affect the determination of the resonator peak.
     for i in range(corr.shape[0]):
         t = ts[i]
         cslice = corr[i,t-2:t+3]
-        if cslice.size < ii.size:
-          continue
         #a,b,c = np.polyfit(ii,cslice,2)
+        if len(cslice) < len(ii):
+            ts2[i] = np.inf
+            continue
         a,b,c = np.dot(solv,cslice)
         ts2[i] = -b/(2*a) + t
-    
+
+    mask = np.isfinite(ts2)
+    invmask = np.isinf(ts2)
+    ts2[invmask] = np.mean(ts2[mask])
     ts2 = ts2 - np.mean(ts2)
-    plt.plot(ts2)
-    plt.show()
+    #plt.plot(corr[0, :])
+    #plt.show()
     return ts2
 

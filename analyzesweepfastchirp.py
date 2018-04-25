@@ -9,7 +9,14 @@ from math import pi
 
 import chirpanal
 
-resfreqs = [251.64, 252.58, 252.85, 282.03, 282.38, 284.3]
+#plotfolder = 'lowtemp'
+plotfolder = 'hightemp'
+if not os.path.exists(plotfolder):
+    os.mkdir(plotfolder)
+
+clean_cache = False
+resfreqs = [251.328, 252.26, 252.565, 281.684, 281.929, 283.995]
+#resfreqs = [251.64, 252.58, 252.85, 282.03, 282.38, 284.3]
 #resfreqs = [253.305, 254.248, 254.514, 283.687, 283.950, 285.974]
 
 fn = sys.argv[1]
@@ -31,7 +38,11 @@ def reduce_fastchirp(fn,desc):
     fn2 = fn + '.npy'
     if os.path.exists(fn2):
         print("found cached "+fn2)
-        return np.load(fn2)
+        if clean_cache:
+            os.remove(fn2)
+            print ("cache ", fn2, "removed")
+        else:
+            return np.load(fn2)
     z,_ = chirpanal.loadmeas(fn)
     z = z[80:]
     nchunk = z.size // ntotal
@@ -45,6 +56,8 @@ def reduce_fastchirp(fn,desc):
     fs *= 1e-6
     zf = np.fft.fftshift(fftpack.fft(z,axis=1)/np.sqrt(z.shape[1]),axes=(1,))
 
+    plotpath = os.path.join(plotfolder, 'rawfig')
+
     muzf = np.mean(zf,axis=0)
     pl.clf()
     pl.plot(fs,np.abs(muzf))
@@ -54,7 +67,7 @@ def reduce_fastchirp(fn,desc):
     pl.title(desc)
     pl.gca().set_yscale('log')
     pl.ylim(1e-1,1e5)
-    pl.savefig('rawfig/%s_all_meanpsd.png'%desc)
+    pl.savefig(plotpath + '/%s_all_meanpsd.png'%desc)
     pl.clf()
 
     nresfreq = len(resfreqs)
@@ -63,7 +76,8 @@ def reduce_fastchirp(fn,desc):
     df = fs[1] - fs[0]
     for i in range(nresfreq):
         resfreq = resfreqs[i]
-        fw = 0.39
+        #fw = 5.0
+        fw = 0.15
         ok = (resfreq - fw < fs) & (fs < resfreq + fw)
         zfc = zf[:,ok]
 
@@ -72,8 +86,19 @@ def reduce_fastchirp(fn,desc):
         pl.ylabel('PSD (DAC^2/Hz)')
         pl.title('%s ch %02d %.3f'%(desc,i,resfreq))
         pl.grid()
-        pl.savefig('rawfig/%s_ch%02d_meanpsd.png'%(desc,i))
+        pl.savefig(plotpath + '/%s_ch%02d_meanpsd.png'%(desc,i))
         pl.clf()
+
+        N = zfc.shape[0]
+        pl.figure()
+        for ind in range(0, N, N//2):
+            pl.plot(fs[ok], np.abs(zfc[ind]))
+        pl.xlabel('Frequency (MHz)')
+        pl.ylabel('PSD (DAC^2/Hz)')
+        pl.title('%s ch %02d %.3f'%(desc,i,resfreq))
+        pl.grid()
+        pl.savefig(plotpath + '/%s_ch%02d_sampledpsd.png'%(desc,i))
+        pl.close()
 
         try:
             ys[i] = df*chirpanal.peakfind_convolve(zfc)
@@ -92,7 +117,7 @@ def analyze_gain(date,power,desc):
     t = np.arange(ys.shape[1]) / chirp_rate
     gains = []
 
-    plotfn = 'rawfig/%s_ts.png'%desc
+    plotfn = os.path.join(plotfolder ,'rawfig/%s_ts.png'%desc)
     doplot = not os.path.exists(plotfn)
 
     if doplot: pl.clf()
@@ -120,7 +145,7 @@ def analyze_noise(date,desc,fn,chirp_rate):
     nresfreq = len(resfreqs)
     nperseg = 1024
 
-    plotfn = 'rawfig/%s_ts.png'%(desc)
+    plotfn = os.path.join(plotfolder ,'rawfig/%s_ts.png'%desc)
     doplot = not os.path.exists(plotfn)
 
     t = np.arange(ys.shape[1]) / chirp_rate
@@ -143,35 +168,62 @@ def analyze_noise(date,desc,fn,chirp_rate):
         pl.savefig(plotfn)
 
     #if doplot and chirp_rate < fast_chirp_rate:
-        #common_mode(ys,desc)
+    common_mode(ys,desc)
     return fs,asds
 
 def common_mode(ys,desc):
-    ch0 = 2
-    ch1 = 4
-    ys = ys[[ch0,ch1],:]
-    nperseg = 1024
+    channel_list = list(range(6))
+    cross_terms = [[a,b] for a in channel_list\
+            for b in channel_list if a > b]
+    plotpath = os.path.join(plotfolder, 'cross_spectra')
+    if not os.path.exists(plotpath):
+        os.mkdir(plotpath)
 
-    pl.close()
-    pl.figure()
-    fs,csd = signal.csd(ys[0],ys[1],fs=chirp_rate,detrend='linear',scaling='density',nperseg=nperseg)
-    fs,psd0 = signal.welch(ys[0],fs=chirp_rate,detrend='linear',scaling='density',nperseg=nperseg)
-    fs,psd1 = signal.welch(ys[1],fs=chirp_rate,detrend='linear',scaling='density',nperseg=nperseg)
-    print(desc)
-    pl.clf()
-    pl.plot(fs,np.abs(psd0),label='ch%02d'%ch0)
-    pl.plot(fs,np.abs(psd1),label='ch%02d'%ch1)
-    pl.plot(fs,np.abs(csd),label='ch%02d x ch%02d'%(ch0,ch1))
-    pl.gca().set_xscale('log')
-    pl.gca().set_yscale('log')
-    pl.grid()
-    pl.xlabel('Frequency (Hz)')
-    pl.ylabel('ASD (Hz/rtHz)')
-    pl.title('cm_%s'%desc)
-    pl.legend()
-    pl.savefig('rawfig/cm_%s.png'%desc)
-    pl.clf()
+    nperseg = 256 #1024
+    for cterm in cross_terms:
+        ch0, ch1 = cterm
+        y = ys[[ch0,ch1],:]
 
+        pl.close()
+        pl.figure()
+        fs,csd = signal.csd(y[0],y[1],fs=chirp_rate,\
+                detrend='linear',scaling='density',nperseg=nperseg)
+        fs,psd0 = signal.welch(y[0],fs=chirp_rate,\
+                detrend='linear',scaling='density',nperseg=nperseg)
+        fs,psd1 = signal.welch(y[1],fs=chirp_rate,\
+                detrend='linear',scaling='density',nperseg=nperseg)
+        print(desc)
+        pl.clf()
+        pl.plot(fs,np.abs(psd0),label='%3.1fMHz'%resfreqs[ch0])
+        pl.plot(fs,np.abs(psd1),label='%3.1fMHz'%resfreqs[ch1])
+        pl.plot(fs,np.abs(csd),\
+                label='%3.1fMHz x %3.1fMHz'%(resfreqs[ch0], resfreqs[ch1]))
+        pl.gca().set_xscale('log')
+        pl.gca().set_yscale('log')
+        pl.grid()
+        pl.xlabel('Frequency (Hz)')
+        pl.ylabel('ASD (Hz/rtHz)')
+        pl.title('cm_%s'%desc)
+        pl.legend()
+        pl.savefig(plotpath + '/cm_%s_ch%02d_ch%02d.png'%(desc, ch0, ch1))
+        pl.clf()
+
+        # Correlation coefficient
+        rho = np.abs(csd)/(np.abs(psd0)*np.abs(psd1))**0.5
+        pl.figure()
+        pl.plot(fs, rho)
+        pl.gca().set_xscale('log')
+        pl.gca().set_yscale('log')
+        pl.grid()
+        pl.ylim(ymax=1,ymin=0)
+        pl.xlabel('Frequency (Hz)')
+        pl.ylabel('Correlation Coefficient')
+        pl.title('%3.1fMHz x %3.1fMHz %s'%(resfreqs[ch0], resfreqs[ch1],
+            desc))
+        #pl.legend()
+        pl.savefig(plotpath +\
+                '/cm_coeff_%s_ch%02d_ch%02d.png'%(desc, ch0, ch1))
+        pl.close()
 
 def rawreduce(fn):
     dates = []
@@ -181,6 +233,7 @@ def rawreduce(fn):
     #gains = []
     asds = []
     fastasds = []
+
     for line in open(fn):
         _,date,temp,txgain,power = line.split()
         #_,date,temp,txgain,power,dpin = line.split()
@@ -199,7 +252,7 @@ def rawreduce(fn):
         #gain = analyze_gain(date,power,desc)
         #gains.append(gain)
 
-        desc = "noise_%ddB_%.2fpW"%(txgain,power)
+        desc = "noise_%ddB"%(txgain)
         fn = os.path.join('raw',date+'noise')
         fs,asd = analyze_noise(date,desc,fn,chirp_rate)
         asds.append(asd)
@@ -215,9 +268,13 @@ def rawreduce(fn):
     return d
 
 def main():
-    if not os.path.exists('rawfig'):
-        os.mkdir('rawfig')
+    plotpath = os.path.join(plotfolder, 'rawfig')
+    if not os.path.exists(plotpath):
+        os.mkdir(plotpath)
 
+    plotpath_fig = os.path.join(plotfolder, 'fig')
+    if not os.path.exists(plotpath_fig):
+      os.mkdir(plotpath_fig)
     fn = sys.argv[1]
     d = rawreduce(fn)
     dates = d['dates']
@@ -244,7 +301,8 @@ def main():
         pl.xlabel('Frequency (Hz)')
         pl.ylabel('NEF (Hz/rtHz)')
         pl.title('NEF %3.1f MHz'%resfreqs[ch])
-        pl.savefig('fig/nefasd_%3.1fMHz.png'%resfreqs[ch])
+        pl.savefig(os.path.join(plotfolder,\
+          'fig/nefasd_%3.1fMHz.png'%resfreqs[ch]))
         pl.close()
 
 
@@ -282,8 +340,9 @@ def main():
         pl.legend(loc='best')
         pl.title('NEF %3.1f MHz'%resfreqs[ch])
         pl.gca().set_yscale('log')
-        pl.ylim(1,100)
-        pl.savefig('fig/nef_%3.1fMHz.png'%resfreqs[ch])
+        pl.ylim(1,1e3)
+        pl.savefig(os.path.join(plotfolder,\
+          'fig/nef_%3.1fMHz.png'%resfreqs[ch]))
         pl.clf()
 
 if __name__=='__main__':
